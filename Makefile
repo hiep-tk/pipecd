@@ -65,7 +65,7 @@ build/plugin:
 	@echo "Building plugins..."
 	@for plugin in $(shell echo $(PLUGINS) | tr ',' ' '); do \
 		echo "Building plugin: $$plugin"; \
-		go build -o $(PLUGINS_OUT_DIR)/$$plugin $(PLUGINS_SRC_DIR)/$$plugin \
+		go build -gcflags="all=-N -l" -o $(PLUGINS_OUT_DIR)/$$plugin $(PLUGINS_SRC_DIR)/$$plugin \
 			&& cp $(PLUGINS_OUT_DIR)/$$plugin $(PLUGINS_BIN_DIR)/$$plugin; \
 	done
 	@echo "Plugins are built and copied to $(PLUGINS_BIN_DIR)"
