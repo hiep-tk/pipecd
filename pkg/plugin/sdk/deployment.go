@@ -190,7 +190,6 @@ func (s *DeploymentPluginServiceServer[Config, DeployTargetConfig, ApplicationCo
 		}
 		lp.Complete(time.Minute)
 	}()
-
 	client := &Client{
 		base:          s.client,
 		pluginName:    s.name,
@@ -324,7 +323,13 @@ func executeStage[Config, DeployTargetConfig, ApplicationConfigSpec any](
 
 	in := &ExecuteStageInput[ApplicationConfigSpec]{
 		Request: ExecuteStageRequest[ApplicationConfigSpec]{
-			StageName:               request.GetInput().GetStage().GetName(),
+			Stage: PipelineStage{
+				Name:               request.GetInput().GetStage().GetName(),
+				Index:              int(request.GetInput().GetStage().GetIndex()),
+				Rollback:           request.GetInput().GetStage().GetRollback(),
+				Metadata:           request.GetInput().GetStage().GetMetadata(),
+				AvailableOperation: ManualOperation(request.GetInput().GetStage().GetAvailableOperation()),
+			},
 			StageConfig:             request.GetInput().GetStageConfig(),
 			RunningDeploymentSource: runningDeploymentSource,
 			TargetDeploymentSource:  targetDeploymentSource,
@@ -565,8 +570,8 @@ type ExecuteStageInput[ApplicationConfigSpec any] struct {
 
 // ExecuteStageRequest is the request to execute a stage.
 type ExecuteStageRequest[ApplicationConfigSpec any] struct {
-	// The name of the stage to execute.
-	StageName string
+	// The stage to execute.
+	Stage PipelineStage
 	// Json encoded configuration of the stage.
 	StageConfig []byte
 
@@ -596,6 +601,12 @@ type Deployment struct {
 	TriggeredBy string
 	// CreatedAt is the time when the deployment was created.
 	CreatedAt int64
+	// RepositoryURL is the repo remote path
+	RepositoryURL string
+	// Summary is the simple description about what this deployment does
+	Summary string
+	// Labels are custom attributes to identify applications
+	Labels map[string]string
 }
 
 // newDeployment converts the model.Deployment to the internal representation.
@@ -608,6 +619,9 @@ func newDeployment(deployment *model.Deployment) Deployment {
 		ProjectID:       deployment.GetProjectId(),
 		TriggeredBy:     deployment.TriggeredBy(),
 		CreatedAt:       deployment.GetCreatedAt(),
+		RepositoryURL:   deployment.GetGitPath().GetRepo().GetRemote(),
+		Summary:         deployment.GetSummary(),
+		Labels:          deployment.GetLabels(),
 	}
 }
 
