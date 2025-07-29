@@ -17,6 +17,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"strconv"
@@ -44,6 +45,26 @@ type ContextInfo struct {
 	IsRollback          bool              `json:"isRollback,omitempty"`
 }
 type plugin struct{}
+type deploymentMetadataStore interface {
+	GetDeploymentPluginMetadata(ctx context.Context, key string) (string, error)
+	PutDeploymentPluginMetadata(ctx context.Context, key string, value string) error
+}
+type mockDeploymentMetadataStore struct {
+	metadata map[string]string
+}
+
+func (m *mockDeploymentMetadataStore) GetDeploymentPluginMetadata(_ context.Context, key string) (string, error) {
+	metadata, ok := m.metadata[key]
+	if !ok {
+		return "", fmt.Errorf("metadata store not found")
+	}
+	return metadata, nil
+}
+
+func (m *mockDeploymentMetadataStore) PutDeploymentPluginMetadata(_ context.Context, key string, value string) error {
+	m.metadata[key] = value
+	return nil
+}
 
 func (p *plugin) BuildPipelineSyncStages(_ context.Context, _ sdk.ConfigNone, input *sdk.BuildPipelineSyncStagesInput) (*sdk.BuildPipelineSyncStagesResponse, error) {
 	stages := make([]sdk.PipelineStage, 0, len(input.Request.Stages)*2)
@@ -79,18 +100,35 @@ func (p *plugin) BuildPipelineSyncStages(_ context.Context, _ sdk.ConfigNone, in
 }
 func (p *plugin) ExecuteStage(ctx context.Context, _ sdk.ConfigNone, _ sdk.DeployTargetsNone, input *sdk.ExecuteStageInput[struct{}]) (*sdk.ExecuteStageResponse, error) {
 	return &sdk.ExecuteStageResponse{
-		Status: executeScriptRun(ctx, input.Request, input.Client.LogPersister()),
+		Status: executeScriptRun(ctx, input.Request, input.Client.LogPersister(), input.Client),
 	}, nil
 }
 
-func executeScriptRun(ctx context.Context, request sdk.ExecuteStageRequest[struct{}], lp sdk.StageLogPersister) sdk.StageStatus {
+func executeScriptRun(ctx context.Context, request sdk.ExecuteStageRequest[struct{}], lp sdk.StageLogPersister, metadataStore deploymentMetadataStore) sdk.StageStatus {
 	lp.Infof("Start executing the script run stage")
 	opts, err := decode(request.StageConfig)
 	if err != nil {
 		lp.Errorf("failed to decode the stage config: %v", err)
 		return sdk.StageStatusFailure
 	}
-	if opts.Run == "" {
+	commandToRun := ""
+	if request.StageName == stageScriptRun {
+		if err := metadataStore.PutDeploymentPluginMetadata(ctx, strconv.Itoa(request.StageIndex), "_"); err != nil {
+			lp.Errorf("failed to mark stage as run: %v", err)
+			return sdk.StageStatusFailure
+		}
+		commandToRun = opts.Run
+	} else {
+		_, err := metadataStore.GetDeploymentPluginMetadata(ctx, strconv.Itoa(request.StageIndex))
+		if strings.HasPrefix(err.Error(), "metadata store not found") {
+			return sdk.StageStatusSuccess
+		}
+		if err != nil {
+			return sdk.StageStatusFailure
+		}
+		commandToRun = opts.OnRollback
+	}
+	if commandToRun == "" {
 		return sdk.StageStatusSuccess
 	}
 	c := make(chan sdk.StageStatus, 1)
